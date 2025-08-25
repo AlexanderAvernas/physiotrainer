@@ -12,16 +12,16 @@ export default function AuthProvider({
   const { setUser, setProfile, setLoading } = useAuthStore()
 
   useEffect(() => {
-    // Hämta initial session
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setUser(session?.user ?? null)
+    // SÄKER: Hämta initial användare med getUser()
+    const getInitialUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
 
-      if (session?.user) {
+      if (user) {
         const { data: profile } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', session.user.id)
+          .eq('id', user.id)
           .single()
 
         setProfile(profile)
@@ -30,12 +30,13 @@ export default function AuthProvider({
       setLoading(false)
     }
 
-    getSession()
+    getInitialUser()
 
     // Lyssna på auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Detta är OK - session kommer från auth event, inte localStorage
       setUser(session?.user ?? null)
 
       if (session?.user) {

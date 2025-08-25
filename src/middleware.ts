@@ -1,11 +1,14 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+// import type { CookieOptions } from '@supabase/ssr'
 import { Database } from '@/types/database'
 
 export async function middleware(req: NextRequest) {
-  const supabaseResponse = NextResponse.next({
-    request: req,
+  let response = NextResponse.next({
+    request: {
+      headers: req.headers,
+    },
   })
 
   const supabase = createServerClient<Database>(
@@ -19,26 +22,34 @@ export async function middleware(req: NextRequest) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             req.cookies.set(name, value)
-            supabaseResponse.cookies.set(name, value, options)
+            response = NextResponse.next({
+              request: {
+                headers: req.headers,
+              },
+            })
+            response.cookies.set(name, value, options)
           })
         },
       },
     }
   )
 
-  // Refresh session if expired
-  const { data: { session } } = await supabase.auth.getSession()
+  // SÄKER: Använd getUser() istället för getSession()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   // Skyddade rutter
   if (req.nextUrl.pathname.startsWith('/dashboard')) {
-    if (!session) {
+    if (!user) {
       return NextResponse.redirect(new URL('/login', req.url))
     }
 
+    // SÄKER: Använd verifierat user.id
     const { data: profile } = await supabase
       .from('profiles')
       .select('is_approved')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single()
 
     if (!profile?.is_approved) {
@@ -46,7 +57,7 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  return supabaseResponse
+  return response
 }
 
 export const config = {

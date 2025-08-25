@@ -15,6 +15,8 @@ export default function PendingPage() {
 
   const checkApproval = async () => {
     setChecking(true)
+
+    // SÄKER: Använd getUser() för att verifiera användaren
     const { data: { user } } = await supabase.auth.getUser()
 
     if (user) {
@@ -29,6 +31,9 @@ export default function PendingPage() {
       } else {
         alert('Du är fortfarande inte godkänd. Försök igen senare.')
       }
+    } else {
+      // Användaren är inte längre autentiserad
+      router.push('/login')
     }
     setChecking(false)
   }
