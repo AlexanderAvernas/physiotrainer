@@ -6,12 +6,12 @@ export const performLogout = async () => {
   console.log('🚪 Starting complete logout process...')
 
   try {
-    // 1. Rensa Zustand state först
+    // 1. Clear Zustand state first
     const { clearAuth } = useAuthStore.getState()
     clearAuth()
     console.log('✅ Cleared Zustand auth state')
 
-    // 2. Signout från Supabase med global scope
+    // 2. Sign out from Supabase with global scope
     const { error } = await supabase.auth.signOut({ scope: 'global' })
 
     if (error) {
@@ -20,27 +20,51 @@ export const performLogout = async () => {
       console.log('✅ Supabase logout successful')
     }
 
-    // 3. Rensa alla cookies manuellt
-    document.cookie.split(";").forEach(function(c) {
-      document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-    })
-    console.log('✅ Cleared all cookies')
+    // 3. Manual cookie clearing (more targeted)
+    const cookies = document.cookie.split(";")
+    cookies.forEach(function(cookie) {
+      const eqPos = cookie.indexOf("=")
+      const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim()
 
-    // 4. Rensa sessionStorage och localStorage
+      // Only clear auth-related cookies
+      if (name.includes('sb-') || name.includes('auth') || name.includes('supabase')) {
+        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname
+        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/"
+      }
+    })
+    console.log('✅ Cleared auth cookies')
+
+    // 4. Clear specific storage items
     try {
-      sessionStorage.clear()
-      localStorage.removeItem('sb-' + process.env.NEXT_PUBLIC_SUPABASE_URL?.split('//')[1]?.split('.')[0] + '-auth-token')
+      const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.split('//')[1]?.split('.')[0]
+      if (projectRef) {
+        sessionStorage.removeItem(`sb-${projectRef}-auth-token`)
+        localStorage.removeItem(`sb-${projectRef}-auth-token`)
+      }
+
+      // Clear any other auth-related items
+      Object.keys(localStorage).forEach(key => {
+        if (key.includes('sb-') || key.includes('auth') || key.includes('supabase')) {
+          localStorage.removeItem(key)
+        }
+      })
+
+      Object.keys(sessionStorage).forEach(key => {
+        if (key.includes('sb-') || key.includes('auth') || key.includes('supabase')) {
+          sessionStorage.removeItem(key)
+        }
+      })
     } catch (e) {
-      console.log('Cookie/storage clear partially failed, but continuing...')
+      console.log('Storage clear partially failed, but continuing...', e)
     }
 
-    // 5. Force redirect med window.location för att säkerställa full reset
-    console.log('🔄 Redirecting to login...')
+    // 5. Force full page reload to login to ensure clean state
+    console.log('🔄 Redirecting to login with full reload...')
     window.location.href = '/login'
 
   } catch (error) {
     console.error('💥 Logout process failed completely:', error)
-    // Även vid total failure, force redirect
+    // Even on total failure, force redirect
     window.location.href = '/login'
   }
 }

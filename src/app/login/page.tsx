@@ -1,8 +1,10 @@
+// src/app/login/page.tsx
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { useAuthStore } from '@/stores/authStore'
 import Link from 'next/link'
 
 export default function LoginPage() {
@@ -11,24 +13,100 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const router = useRouter()
+  const { user, clearAuth } = useAuthStore()
+  const redirectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      console.log('User already logged in, redirecting to dashboard')
+      router.push('/dashboard')
+    }
+  }, [user, router])
+
+  // Clear any existing auth state when component mounts
+  useEffect(() => {
+    console.log('Login page mounted, ensuring clean state...')
+    clearAuth()
+  }, [clearAuth])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    console.log('Starting login process...')
 
-    if (error) {
-      setError(error.message)
-    } else {
-      router.push('/dashboard')
+    try {
+      // Clear any existing session first
+      await supabase.auth.signOut({ scope: 'global' })
+
+      // Wait for cleanup to complete
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      // Attempt login
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+
+      if (loginError) {
+        console.error('Login error:', loginError)
+        setError(loginError.message)
+        return
+      }
+
+      if (data.user) {
+        console.log('Login successful for user:', data.user.id)
+
+        // Wait longer for auth state to propagate properly
+        console.log('Waiting for auth state to propagate...')
+
+        // Use a longer delay and multiple checks
+        let authStateReady = false
+        let attempts = 0
+        const maxAttempts = 10
+
+        while (!authStateReady && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 300))
+
+          // Check if auth state has propagated by verifying the session
+          const { data: sessionData } = await supabase.auth.getSession()
+          if (sessionData.session?.user?.id === data.user.id) {
+            console.log('Auth state confirmed, ready to redirect')
+            authStateReady = true
+          } else {
+            attempts++
+            console.log(`Waiting for auth state... attempt ${attempts}/${maxAttempts}`)
+          }
+        }
+
+        if (!authStateReady) {
+          console.log('Auth state not fully ready, but proceeding with redirect')
+        }
+
+        // Use replace to avoid back button issues and add a small additional delay
+        redirectTimeoutRef.current = setTimeout(() => {
+          console.log('Redirecting to dashboard...')
+          router.replace('/dashboard')
+        }, 100)
+      }
+
+    } catch (error: any) {
+      console.error('Login process failed:', error)
+      setError('Ett oväntat fel uppstod. Försök igen.')
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   return (
@@ -55,6 +133,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10"
                 placeholder="Email"
+                disabled={loading}
               />
             </div>
             <div>
@@ -65,6 +144,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10"
                 placeholder="Lösenord"
+                disabled={loading}
               />
             </div>
           </div>
