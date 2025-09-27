@@ -1,7 +1,7 @@
 // src/app/login/page.tsx
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/stores/authStore'
@@ -14,7 +14,6 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const router = useRouter()
   const { user, clearAuth } = useAuthStore()
-  const redirectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Redirect if already logged in
   useEffect(() => {
@@ -30,15 +29,6 @@ export default function LoginPage() {
     clearAuth()
   }, [clearAuth])
 
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (redirectTimeoutRef.current) {
-        clearTimeout(redirectTimeoutRef.current)
-      }
-    }
-  }, [])
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -47,13 +37,6 @@ export default function LoginPage() {
     console.log('Starting login process...')
 
     try {
-      // Clear any existing session first
-      await supabase.auth.signOut({ scope: 'global' })
-
-      // Wait for cleanup to complete
-      await new Promise(resolve => setTimeout(resolve, 200))
-
-      // Attempt login
       const { data, error: loginError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -68,42 +51,55 @@ export default function LoginPage() {
       if (data.user) {
         console.log('Login successful for user:', data.user.id)
 
-        // Wait longer for auth state to propagate properly
-        console.log('Waiting for auth state to propagate...')
+        // VÄNTA på att auth state uppdateras innan redirect
+        console.log('Waiting for auth state update...')
 
-        // Use a longer delay and multiple checks
-        let authStateReady = false
-        let attempts = 0
-        const maxAttempts = 10
+        // Kolla om AuthProvider har uppdaterat state
+        const checkAuthState = () => {
+          return new Promise<void>((resolve) => {
+            const maxWait = 3000 // Max 3 sekunder
+            const startTime = Date.now()
 
-        while (!authStateReady && attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 300))
+            const check = () => {
+              const currentState = useAuthStore.getState()
 
-          // Check if auth state has propagated by verifying the session
-          const { data: sessionData } = await supabase.auth.getSession()
-          if (sessionData.session?.user?.id === data.user.id) {
-            console.log('Auth state confirmed, ready to redirect')
-            authStateReady = true
-          } else {
-            attempts++
-            console.log(`Waiting for auth state... attempt ${attempts}/${maxAttempts}`)
-          }
+              // Om vi har user i state ELLER för lång tid gått - fortsätt
+              if (currentState.user?.id === data.user.id || (Date.now() - startTime) > maxWait) {
+                console.log('Auth state ready or timeout reached, redirecting...')
+                resolve()
+              } else {
+                // Vänta lite till och försök igen
+                setTimeout(check, 100)
+              }
+            }
+
+            check()
+          })
         }
 
-        if (!authStateReady) {
-          console.log('Auth state not fully ready, but proceeding with redirect')
-        }
+        await checkAuthState()
 
-        // Use replace to avoid back button issues and add a small additional delay
-        redirectTimeoutRef.current = setTimeout(() => {
-          console.log('Redirecting to dashboard...')
-          router.replace('/dashboard')
-        }, 100)
+        console.log('About to redirect to dashboard...')
+
+        // FÖRST - testa bara window.location direkt
+        console.log('Using window.location.href directly...')
+        window.location.href = '/dashboard'
+
+        console.log('Redirect command executed')
+
+        // Om vi når hit betyder det att window.location inte fungerade
+        setTimeout(() => {
+          console.log('Still here after window.location - something blocked it')
+        }, 500)
       }
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Login process failed:', error)
-      setError('Ett oväntat fel uppstod. Försök igen.')
+      if (error instanceof Error) {
+        setError(`Ett fel uppstod: ${error.message}`)
+      } else {
+        setError('Ett oväntat fel uppstod. Försök igen.')
+      }
     } finally {
       setLoading(false)
     }
